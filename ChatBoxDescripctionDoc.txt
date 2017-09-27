@@ -1,0 +1,172 @@
+Programmable Chat, a great way to add a chat functionality to your application. 
+
+There are scenarios where users don't have access to internet connection, and can only use SMS in certain point of time. Let's assume that we have an agent, that is chatting with a field agent that doesn't have any access to internet connection. 
+
+Let's start off with the UI, we wil; download a premade UI that we'll be using as framework for our chat between the agent and the field user. 
+
+Download the ChatBox folder from here: https://github.com/amatinain/ChatBox/tree/master/ChatBox and let's put it on your public folder. 
+
+Now, let's add the prog chat source to the application:
+
+ <script src="https://media.twiliocdn.com/sdk/js/common/v0.1/twilio-common.min.js"></script>
+ <script src="https://media.twiliocdn.com/sdk/js/chat/v1.0/twilio-chat.min.js"></script>
+ 
+Now, let's jump to the creation of the server side, where we will create the incoming message handling by your Twilio number.
+
+Purchase a number.
+
+Now, several key things that we need to know before we start are:
+
+1. Channel - is where all the messages exist, meaning the message is not sent from user to user, but rather added to a channel where later a member of that channel can cosume it.
+2. User - is an entity that exists in your Prog Chat instance, you can create users even if they are not part of a channel. 
+3. Member - is a user that has joined a specific channel.
+
+On the server side the abstract logic will be the following:
+
+We will first check for the user existance, if the user doesn't exist, we will need to create that users. 
+
+After that, we need to check for channel existance, and in that channel, we will check for member existance of the user and then of the destination user (the agent), if the channel doesn't have these as members we will add them as members to the channel.
+
+After we have done all these checks for channel, user, member existnace, we can create a message that will be sent to the channel and then cosumed by the agent. 
+
+Here's how we are going to do it (PHP):
+
+
+Create parameters with your credentials:
+
+$sid = "XXXXXX";
+$token = "XXXXX";
+$serviceSid = 'XXXXXXXX';
+
+Let's create parameter that will intake the request from the incoming message webhook, the From and Body values. Then, we assign an agent name as agent name 1. With the channel, we will create a channel name of the agent name, underscore, the from value (phone number), this will be useful as we will know who is having a conversation with who.
+
+====================================================================================================
+$fromUserName = $_REQUEST['From'];
+$messageBody = $_REQUEST['Body'];
+$agentName = 'agent1';
+$channelName = $agentName . '_' . $fromUserName;
+====================================================================================================
+
+Now, we can initilize the client with the account sid and auth token, and then address our service instace, like so:
+
+====================================================================================================
+$client = new Client($sid, $token);
+$service = $client->chat->services($serviceSid);
+====================================================================================================
+
+First thing first, we create a function that will check the user's existance.
+
+Try to fetch the user from the service, if the user doesn't exist, we leave the catch empty so that the code won't break at this point, then we move to if/else logic and if the fetch doesn't return anything (null), we create a new user:
+
+====================================================================================================
+function checkForUserExistance($srv,$user)
+    {  
+        $activeUser = null;
+        
+        try{
+            $activeUser = $srv->users($user)->fetch();
+        }
+        catch(Exception $e)
+            {    
+            }
+        if($activeUser == null)
+            {
+            error_log('User doesnt exist, creating user: ' . $user); 
+            $user = $srv->users->create($user);
+            }
+            return $activeUser;
+    }
+====================================================================================================    
+    
+After we made sure that we have a user in the service instance, we need to check for the existance of a channel (agent+from user). 
+
+Same as last time, we try to fetch the channel, the catch is empty so it won't error out if the channel doesn't exist, if the channel is not found, meaning $channel valie is still null, then we create a new channel with the value of Agent+From, we then return the channel SID, so that we can check the channel SID for members in the next function:
+
+====================================================================================================
+function checkForChannelExistance($srv, $chnlName, $frmUsrNm)
+    {
+        $channel = null;
+        try{    
+            $channel = $srv->channels($chnlName)->fetch();
+            }
+        catch(Exception $e)
+        {
+        }
+        if($channel == null)
+        {
+            $channel = $srv->channels->create(
+            array(
+            'friendlyName' => 'Agent conversation with' . $frmUsrNm,
+            'uniqueName' => $chnlName));
+        }
+        return $channel->sid;
+    }
+==================================================================================================== 
+
+After we made sure that the channel and user exist, we can now move to checking if these are memeber of the channel in question.
+
+Let's start with creating a function that will intake the parameters of the service, channel sid, memeber identity and From username. Then, we need to create to parameters, to inidcate if the member does exist in the array that we will return from the Channel resource. Unfortunaltley, at the moment, we can only return members by SID, hence, we will need to return all the channel members first:
+
+====================================================================================================
+function checkForMemberExistance($srv, $chnlSid, $mem, $frmUsrNm)
+
+//create two values that are set to false
+            $agentExistInChannel = false;
+            $userExistInChannel = false;
+            //get the member list of the channel in question
+            $memberList = $srv->channels($chnlSid)->members->read();
+==================================================================================================== 
+
+Then, we can check the array returned by the Channel/Members resource and continue with our code, which will loop through the array, and check each member returned for it's identity, while looping through each member, we will check, if it's either equals the agent name or user name:
+
+====================================================================================================
+//loop through all the members in the channel
+            foreach($memberList as $checkFormember)
+                {
+                    
+                    //check if the member exist, then change the value we have created before to true
+                    error_log($mem . " " . $checkFormember->identity);
+                    if($checkFormember->identity == $mem)
+                    {
+                        $agentExistInChannel = true;
+                        $member = $checkFormember;
+                    }
+                    elseif($checkFormember->identity == $frmUsrNm)
+                    {
+                        $userExistInChannel = true;
+                        $member = $checkFormember;
+                    }
+====================================================================================================                    
+                    
+Cool! now that we know the member list of each channel, and if it does or doesn't exist in the channel, we need to add the member if it's not added already to the channel. Let's do so by checking if the either the userExistInChannel or agentExistInChannel values are false, if they are let's try to add the user and the agent as the member of the channel we created:
+
+====================================================================================================
+//if the agent or the user doesn't exist
+                    if($agentExistInChannel == false || $userExistInChannel == false)
+                    {
+                        
+                        //try to add the agent as member
+                        try
+                        {   
+                        error_log('Try to add Agent to channel');
+                        $member = $srv->channels($chnlSid)->members->create($mem);
+                        }
+                        catch(Exception $e)
+                        {
+                        error_log('agent already exist in the channel');    
+                        $e->getMessage();  
+                        }
+                        //try to add the user as member
+                        try
+                        {    
+                        error_log('Try to add User to channel');
+                        $member = $srv->channels($chnlSid)->members->create($frmUsrNm);
+                        }
+                        catch(Exception $e)
+                        {
+                        error_log('user already exist in the channel');    
+                        $e->getMessage();  
+                        }
+                    }   
+====================================================================================================                    
+

@@ -33,13 +33,14 @@ function checkForChannelExistance($srv, $chnlName, $frmUsrNm)
             $channel = $srv->channels($chnlName)->fetch();
             }
         catch(Exception $e)
-        {
-        }
+            {
+                error_log('No such channel, procesding to channel');
+            }
         //if the channle is not found, meaning the $channel value is still null, then create a new channel
         //with the name of the agent+the From value
         if($channel == null)
         {
-            error_log('Channel doesnt exist, creating channel'); 
+            error_log('Creating channel' . $chnlName); 
             $channel = $srv->channels->create(
             array(
             'friendlyName' => 'Agent conversation with' . $frmUsrNm,
@@ -57,6 +58,7 @@ function checkForMemberExistance($srv, $chnlSid, $mem, $frmUsrNm)
             $userExistInChannel = false;
             //get the member list of the channel in question
             $memberList = $srv->channels($chnlSid)->members->read();
+            
             //loop through all the members in the channel
             foreach($memberList as $checkFormember)
                 {
@@ -118,11 +120,12 @@ function checkForUserExistance($srv,$user)
             $activeUser = $srv->users($user)->fetch();
         }
         catch(Exception $e)
-            {    
+            {
+            error_log('No such user as ' . $user);    
             }
         if($activeUser == null)
             {
-            error_log('User doesnt exist, creating user: ' . $user); 
+            error_log('Creating user: ' . $user); 
             $user = $srv->users->create($user);
             }
             return $activeUser;
